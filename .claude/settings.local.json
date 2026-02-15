@@ -1,7 +1,9 @@
 {
   "permissions": {
     "allow": [
-      "Bash(ren:*)"
+      "Bash(ren:*)",
+      "Bash(cd:*)",
+      "Bash(dir:*)"
     ]
   }
 }
