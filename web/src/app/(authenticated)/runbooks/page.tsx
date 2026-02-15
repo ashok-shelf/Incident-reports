@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { getRunbooksList } from "@/lib/runbooks";
 
+export const dynamic = "force-dynamic";
+
 export default async function RunbooksPage() {
   const runbooks = await getRunbooksList();
 

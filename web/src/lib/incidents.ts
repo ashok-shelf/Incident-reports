@@ -1,6 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { CHANGELOG_PATH, INCIDENTS_DIR } from "./constants";
+import { INCIDENTS_DIR } from "./constants";
 
 export interface IncidentSummary {
   id: string;
@@ -20,47 +20,57 @@ export interface IncidentDetail {
   content: string;
 }
 
+/**
+ * Auto-discover all incidents by scanning the filesystem.
+ * No need to update CHANGELOG.md — just create the folder and report.md.
+ */
 export async function getIncidentsList(): Promise<IncidentSummary[]> {
-  const content = await fs.readFile(CHANGELOG_PATH, "utf-8");
-  const lines = content.split("\n");
-
   const incidents: IncidentSummary[] = [];
 
-  for (const line of lines) {
-    // Match table rows that contain incident links
-    const linkMatch = line.match(
-      /\|\s*\[([^\]]+)\]\(([^)]+)\)\s*\|/
-    );
-    if (!linkMatch) continue;
+  try {
+    const years = await fs.readdir(INCIDENTS_DIR);
 
-    const id = linkMatch[1]; // e.g. "INC-001"
-    const linkPath = linkMatch[2]; // e.g. "incidents/2026/INC-001-db-outage/report.md"
+    for (const year of years) {
+      // Skip non-directory entries
+      const yearPath = path.join(INCIDENTS_DIR, year);
+      const yearStat = await fs.stat(yearPath);
+      if (!yearStat.isDirectory()) continue;
 
-    // Extract slug and year from path
-    const pathMatch = linkPath.match(
-      /incidents\/(\d{4})\/([^/]+)\/report\.md/
-    );
-    if (!pathMatch) continue;
+      const slugs = await fs.readdir(yearPath);
 
-    const year = pathMatch[1];
-    const slug = pathMatch[2];
+      for (const slug of slugs) {
+        const reportPath = path.join(yearPath, slug, "report.md");
+        try {
+          const content = await fs.readFile(reportPath, "utf-8");
+          const metadata = parseMetadataTable(content);
 
-    // Split the full row by | and extract cells
-    const cells = line
-      .split("|")
-      .map((c) => c.trim())
-      .filter(Boolean);
+          // Extract the incident ID from the slug (e.g. INC-001 from INC-001-db-outage)
+          const idMatch = slug.match(/^(INC-\d+)/);
+          const id = metadata["Incident ID"] || idMatch?.[1] || slug;
 
-    if (cells.length < 6) continue;
-
-    const date = cells[1];
-    const severity = cells[2].replace(/\*\*/g, ""); // strip bold markers
-    const title = cells[3];
-    const duration = cells[4];
-    const status = cells[5];
-
-    incidents.push({ id, slug, year, date, severity, title, duration, status });
+          incidents.push({
+            id,
+            slug,
+            year,
+            date: metadata["Date"] || "",
+            severity: (metadata["Severity"] || "").split(/\s/)[0], // "P0 — Complete..." -> "P0"
+            title: extractTitle(content),
+            duration: metadata["Duration"] || "",
+            status: extractStatus(content),
+          });
+        } catch {
+          // No report.md in this folder, skip
+          continue;
+        }
+      }
+    }
+  } catch {
+    // incidents dir doesn't exist yet
+    return [];
   }
+
+  // Sort by date descending (newest first)
+  incidents.sort((a, b) => b.date.localeCompare(a.date));
 
   return incidents;
 }
@@ -120,4 +130,49 @@ function parseMetadataTable(content: string): Record<string, string> {
   }
 
   return metadata;
+}
+
+/**
+ * Extract the incident title from the H1 or H2 heading.
+ * Looks for patterns like "## Incident: Title Here"
+ * or falls back to the first H1 after stripping "Production Incident Report"
+ */
+function extractTitle(content: string): string {
+  const lines = content.split("\n");
+
+  for (const line of lines) {
+    // "## Incident: Complete Production Outage — ..."
+    const incidentMatch = line.match(/^##?\s+(?:Incident:\s*)?(.+)/);
+    if (incidentMatch) {
+      const title = incidentMatch[1].trim();
+      // Skip generic headings
+      if (title !== "Production Incident Report" && title.length > 10) {
+        return title;
+      }
+    }
+  }
+
+  // Fallback: use the slug-derived title
+  return "";
+}
+
+/**
+ * Try to find a status line at the bottom of the report.
+ * Look for patterns like "*Status: ..."
+ */
+function extractStatus(content: string): string {
+  const statusMatch = content.match(/\*Status:\s*([^*]+)\*/);
+  if (statusMatch) return statusMatch[1].trim();
+
+  // Check action items for pending/complete counts
+  const pending = (content.match(/⬜/g) || []).length;
+  const complete = (content.match(/✅/g) || []).length;
+  const inProgress = (content.match(/🔄/g) || []).length;
+
+  if (pending + complete + inProgress > 0) {
+    if (pending === 0 && inProgress === 0) return "✅ All actions complete";
+    return `🔄 ${complete} done, ${pending + inProgress} remaining`;
+  }
+
+  return "📋 Report filed";
 }

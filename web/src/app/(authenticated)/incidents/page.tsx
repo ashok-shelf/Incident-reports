@@ -2,6 +2,8 @@ import Link from "next/link";
 import { getIncidentsList } from "@/lib/incidents";
 import { SeverityBadge } from "@/components/severity-badge";
 
+export const dynamic = "force-dynamic";
+
 export default async function IncidentsPage() {
   const incidents = await getIncidentsList();
 
