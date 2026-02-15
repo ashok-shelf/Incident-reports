@@ -11,16 +11,22 @@ export function preprocessContent(
 ): string {
   let processed = content;
 
-  // Rewrite evidence image paths: evidence/filename.png -> /api/evidence/year/slug/filename.png
+  // Rewrite evidence image paths
+  // On Vercel: evidence/file.png -> /evidence/year/slug/file.png (static from public/)
+  // Locally:   evidence/file.png -> /api/evidence/year/slug/file.png (API route)
   if (options.context === "incident" && options.year && options.slug) {
+    const evidenceBase = process.env.VERCEL
+      ? `/evidence/${options.year}/${options.slug}`
+      : `/api/evidence/${options.year}/${options.slug}`;
+
     processed = processed.replace(
       /\(evidence\/([^)]+)\)/g,
-      `(/api/evidence/${options.year}/${options.slug}/$1)`
+      `(${evidenceBase}/$1)`
     );
     // Also handle image src in any raw HTML (unlikely but safe)
     processed = processed.replace(
       /src="evidence\/([^"]+)"/g,
-      `src="/api/evidence/${options.year}/${options.slug}/$1"`
+      `src="${evidenceBase}/$1"`
     );
   }
 
