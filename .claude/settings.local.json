@@ -3,7 +3,9 @@
     "allow": [
       "Bash(ren:*)",
       "Bash(cd:*)",
-      "Bash(dir:*)"
+      "Bash(dir:*)",
+      "Bash(timeout:*)",
+      "Bash(curl:*)"
     ]
   }
 }
