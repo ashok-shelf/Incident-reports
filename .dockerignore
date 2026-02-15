@@ -1,0 +1,11 @@
+node_modules
+web/node_modules
+web/.next
+web/.content
+web/public/evidence
+.git
+.gitignore
+*.md
+!incidents/**/*.md
+!runbooks/**/*.md
+nul
