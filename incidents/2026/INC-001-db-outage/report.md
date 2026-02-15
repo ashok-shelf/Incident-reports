@@ -49,7 +49,9 @@ CPU utilization on the 16-vCPU instance had climbed back to critical levels. The
 - Disk utilization: **40.642%**
 - Peak connections: **108** (within normal range at this point)
 
-> **[Figure 1: Cloud SQL Dashboard — Feb 12 morning, showing 93.867% CPU P99, 40.642% disk utilization, 108 peak connections on the 20 vCPU instance]**
+> **Figure 1:** Cloud SQL Dashboard — Feb 12 morning, showing 93.867% CPU P99, 40.642% disk utilization, 108 peak connections on the 20 vCPU instance
+>
+> ![Fig 1](evidence/fig01-cloud-sql-dashboard-morning.png)
 
 The team decided to upgrade from **16 vCPUs to 20 vCPUs** to address the CPU pressure. Unlike the previous upgrade, this was performed during daytime business hours.
 
@@ -68,21 +70,25 @@ The system was operational but under significant strain. Cloud SQL monitoring sh
 - CPU utilization was sustained at high levels and climbing
 - Database load was elevated, primarily from `shelfscan-prod-v1`
 
-> **[Figure 2: Query Latency chart showing P99 spikes to 30-40 seconds throughout the morning, with P50 near zero]**
-
-> **[Figure 3: CPU Utilization chart showing sustained high utilization ramping up through the morning]**
+> **Figure 2 + 3 + 11:** Query Latency (P99 spikes to 30-40s), CPU Utilization (sustained high), Database Load by DB, and Log Entries by Severity — all from the same dashboard view
+>
+> ![Fig 2, 3, 11](evidence/fig02-03-11-query-latency-cpu-dbload.png)
 
 The "Oldest Transaction by Age" metric began climbing, eventually reaching approximately **25,000 seconds (~7 hours)**. This indicated that a transaction had been held open since early morning — later identified as being associated with the read replica's WAL sender process.
 
-> **[Figure 4: Oldest Transaction by Age chart showing spike to ~25,000 seconds peaking around 1:00 PM IST]**
+> **Figure 4 + 6:** Oldest Transaction by Age (~25,000s spike) and Rows Fetched vs Returned vs Written (500M/s spike), plus WAL Archiving and Transaction ID utilization
+>
+> ![Fig 4, 6](evidence/fig04-06-oldest-txn-rows-fetched.png)
 
 Block read counts spiked to **6 million reads/second**, indicating that queries were scanning enormous volumes of data — far more than expected for normal operations. This was a direct consequence of table bloat from dead rows that autovacuum could not clean up.
 
-> **[Figure 5: Block Read Count chart showing massive spike to 6M/s around 12:00–1:00 PM, primarily from buffer cache with significant disk reads]**
+> **Figure 5 + 10:** Block Read Count (spike to 6M/s), Deadlock Count (zero), Rows Processed by operation, and Rows in DB by state
+>
+> ![Fig 5, 10](evidence/fig05-10-block-reads-deadlock-rows.png)
 
 Rows fetched spiked to approximately **500 million rows/second** — orders of magnitude higher than normal, confirming that queries were scanning through massive amounts of dead (bloated) row data.
 
-> **[Figure 6: Rows Fetched vs Rows Returned vs Rows Written chart showing spike to 500M/s in rows fetched]**
+> **Figure 6:** Rows Fetched vs Returned vs Written — see composite image in Figure 4+6 above
 
 ### Phase 2: Outage Begins (~1:00 PM IST)
 
@@ -96,7 +102,9 @@ Error: timeout exceeded when trying to connect
 
 Within a 30-second window (1:24:00 PM — 1:24:30 PM IST), GCP logging recorded **522 log entries**: 320 Default, 69 Info, 58 Warnings, and **75 Errors**.
 
-> **[Figure 7: GCP Log Summary showing 522 entries in 30 seconds — 320 Default, 69 Info, 58 Warning, 75 Error]**
+> **Figure 7:** GCP Log Summary — 522 entries in 30 seconds (320 Default, 69 Info, 58 Warning, 75 Error)
+>
+> ![Fig 7](evidence/fig07-gcp-log-summary.png)
 
 The error logger (`dbLogger.js`) attempted to write these errors to the production database, which itself was failing — creating a feedback loop:
 
@@ -107,7 +115,9 @@ Failed to log error to DB: Error: timeout exceeded when trying to connect
 
 The shelfscan-portal-backend on Cloud Run began returning **HTTP 400 errors** to all incoming requests. The mobile surveyor app (okhttp 4.12.0 client) received rapid-fire failures with response times of only 11–28ms — the backend was failing fast without even reaching the database.
 
-> **[Figure 8: Backend HTTP logs showing wall of GET 400 responses, all within the same second, 348 bytes each, from okhttp 4.12.0 client]**
+> **Figure 8:** Backend HTTP logs — wall of GET 400 responses, all within the same second, 348 bytes each, from okhttp 4.12.0 client
+>
+> ![Fig 8](evidence/fig08-backend-400-errors.png)
 
 **Cloud SQL Dashboard at peak of outage:**
 
@@ -117,27 +127,33 @@ The shelfscan-portal-backend on Cloud Run began returning **HTTP 400 errors** to
 - Transaction ID utilization: **0.571%** (not a concern)
 - Deadlock count: **0** (confirmed this was not a locking issue)
 
-> **[Figure 9: Cloud SQL Dashboard gauges showing CPU 89.483%, Peak connections 606 (red), 486 log errors, 0 deadlocks]**
+> **Figure 9:** Cloud SQL Dashboard gauges — CPU 89.483%, Peak connections 606 (red), 486 log errors, 0 deadlocks
+>
+> ![Fig 9](evidence/fig09-cloud-sql-dashboard-outage.png)
 
-> **[Figure 10: Deadlock Count by Database chart — flat zero across the entire day, confirming no deadlocks]**
+> **Figure 10:** Deadlock Count by Database — flat zero across the entire day, confirming no deadlocks
+>
+> ![Fig 10](evidence/fig10-deadlock-count.png)
 
 The database load chart showed a massive spike around 1:00 PM IST, dominated by `shelfscan-prod-v1`. The log entries by severity showed a burst of errors concentrated in the same window.
 
-> **[Figure 11: Database Load by Database chart showing massive spike at ~1:00 PM from shelfscan-prod-v1, and Log Entries by Severity showing error burst]**
+> **Figure 11:** Database Load by Database + Log Entries by Severity — see composite image in Figure 2+3+11 above
 
 The connections per database chart revealed that the single Cloud SQL instance was serving **8+ databases** simultaneously, with `shelfscan-prod-v1` consuming the majority of connections (40–50+), alongside `metabase`, `metabase_v58`, `shelfex-dev-v1`, `shelfintel-prod-v1`, `shelfpulse-prod-v1`, `shelfscan-dev-v1`, and `cloudsqladmin`.
 
-> **[Figure 12: Connections per Database chart showing 8+ databases sharing the instance, with shelfscan-prod-v1 dominating at 40-50+ connections]**
+> **Figure 12 + 13:** Connections per Database (8+ DBs, shelfscan-prod-v1 dominating at 40-50+), Wait Event Types (spike to 30+), IO Wait Breakdown (15-20ms/s), and Data Transfer bytes
+>
+> ![Fig 12, 13](evidence/fig12-13-connections-wait-events.png)
 
 Wait events spiked to **30+** during the outage window, and IO wait reached **15–20ms/s**, confirming the disk was being hammered by temp file operations.
 
-> **[Figure 13: Database Load by Wait Event Types showing spike to 30+, and IO Wait Breakdown showing spikes of 15-20ms/s]**
+> **Figure 13:** Wait Events + IO Wait — see composite image in Figure 12+13 above
 
 Temp data size reached **20+ GB** across **2,500+ temporary files**, generated primarily by the visits SELECT query and other operations spilling to disk due to insufficient `work_mem`.
 
-> **[Figure 14: Temp Data Size chart showing shelfscan-prod-v1 generating 20+ GB of temp data]**
-
-> **[Figure 15: Temp Files count chart showing peak of ~2,500–3,000 temp files during the outage window]**
+> **Figure 14 + 15:** Temp Data Size (20+ GB from shelfscan-prod-v1) and Temp Files count (peak ~2,500–3,000)
+>
+> ![Fig 14, 15](evidence/fig14-15-temp-data-and-files.png)
 
 ### Phase 3: Response Actions (1:00 PM — 1:20 PM IST)
 
@@ -201,7 +217,9 @@ Error: connect ECONNREFUSED 34.45.202.189:5432
     at /app/node_modules/pg-pool/index.js:45:11
 ```
 
-> **[Figure 16: Backend logs showing pg-pool timeout errors in rapid succession, followed by slow recovery with 10-13 second response times]**
+> **Figure 16:** Backend logs — pg-pool timeout errors in rapid succession, followed by slow recovery with 10-13 second response times
+>
+> ![Fig 16](evidence/fig16-backend-timeout-errors.png)
 
 We observed **3,000+ errors within a 1-minute window** during the shutdown/restart cycle.
 
@@ -244,9 +262,9 @@ The read replica was immediately stopped. The effect was dramatic:
 - New API requests began succeeding
 - Query latencies returned to normal ranges
 
-> **[Figure 17: Transaction Count chart showing commits dropping during outage and recovering after fix]**
-
-> **[Figure 18: Connection Count by Application Name showing the connection pattern through the day]**
+> **Figure 17 + 18:** Transaction Count (commits dropping during outage, recovering after fix), Connection Count by App Name, New Connections/sec, and Temp Data Size
+>
+> ![Fig 17, 18](evidence/fig14-17-18-txn-connections-temp.png)
 
 **~2:30 PM IST — Full Recovery:**
 All services were fully operational. The surveyor mobile app was functional, portal dashboards were loading, and Metabase analytics were accessible.
@@ -280,7 +298,9 @@ During the outage window, `shelfscan-staging-v1` also experienced errors:
 db=shelfscan-staging-v1,user=postgres,host=34.96.46.91 ERROR: insert or update on...
 ```
 
-> **[Figure 19: Staging database error logs showing insert/update failures during the outage window]**
+> **Figure 19:** Staging database error logs — insert/update failures during the outage window
+>
+> ![Fig 19](evidence/fig19-staging-errors.png)
 
 These staging errors confirm that the staging environment shares the same Cloud SQL instance and was impacted by the same resource exhaustion.
 
@@ -295,7 +315,9 @@ STATEMENT: select "visits"."id", "visits"."visit_id"...
 
 This pattern repeated across thousands of log entries (sequential log numbers climbing past 2,154), indicating the visits query has **inherent performance issues** independent of the replica problem.
 
-> **[Figure 20: Post-recovery logs showing alternating temp file and visits SELECT statements, log numbers reaching 2,154+]**
+> **Figure 20:** Post-recovery logs — alternating temp file and visits SELECT statements, log numbers reaching 2,154+
+>
+> ![Fig 20](evidence/fig20-post-recovery-temp-files.png)
 
 ### 4.4 External Unauthorized Access Attempts
 
@@ -577,26 +599,20 @@ Writing error logs to the same database experiencing an outage amplifies the pro
 
 | Figure | Description | File |
 |---|---|---|
-| Fig 1 | Cloud SQL Dashboard — Feb 12 morning (93.867% CPU, 108 connections) | [evidence/cloud-sql-dashboard-morning.png](evidence/cloud-sql-dashboard-morning.png) |
-| Fig 2 | Query Latency chart (P99 spikes to 30-40s) | [evidence/query-latency.png](evidence/query-latency.png) |
-| Fig 3 | CPU Utilization chart (sustained high, ramping up) | [evidence/cpu-utilization.png](evidence/cpu-utilization.png) |
-| Fig 4 | Oldest Transaction by Age (~25,000 seconds) | [evidence/oldest-transaction.png](evidence/oldest-transaction.png) |
-| Fig 5 | Block Read Count (spike to 6M/s) | [evidence/block-read-count.png](evidence/block-read-count.png) |
-| Fig 6 | Rows Fetched vs Returned vs Written (500M/s spike) | [evidence/rows-fetched.png](evidence/rows-fetched.png) |
-| Fig 7 | GCP Log Summary (522 entries in 30 seconds) | [evidence/gcp-log-summary.png](evidence/gcp-log-summary.png) |
-| Fig 8 | Backend HTTP 400 errors (rapid-fire failures) | [evidence/backend-400-errors.png](evidence/backend-400-errors.png) |
-| Fig 9 | Cloud SQL Dashboard gauges (CPU 89%, connections 606) | [evidence/cloud-sql-dashboard-outage.png](evidence/cloud-sql-dashboard-outage.png) |
-| Fig 10 | Deadlock Count chart (flat zero) | [evidence/deadlock-count.png](evidence/deadlock-count.png) |
-| Fig 11 | Database Load + Log Entries by Severity | [evidence/db-load-and-logs.png](evidence/db-load-and-logs.png) |
-| Fig 12 | Connections per Database (8+ databases) | [evidence/connections-per-database.png](evidence/connections-per-database.png) |
-| Fig 13 | Wait Events + IO Wait Breakdown | [evidence/wait-events-io-wait.png](evidence/wait-events-io-wait.png) |
-| Fig 14 | Temp Data Size (20+ GB) | [evidence/temp-data-size.png](evidence/temp-data-size.png) |
-| Fig 15 | Temp Files count (2,500–3,000 peak) | [evidence/temp-files-count.png](evidence/temp-files-count.png) |
-| Fig 16 | Backend pg-pool timeout + ECONNREFUSED errors | [evidence/backend-timeout-errors.png](evidence/backend-timeout-errors.png) |
-| Fig 17 | Transaction Count (recovery pattern) | [evidence/transaction-count.png](evidence/transaction-count.png) |
-| Fig 18 | Connection Count by Application Name | [evidence/connection-count-by-app.png](evidence/connection-count-by-app.png) |
-| Fig 19 | Staging database errors | [evidence/staging-errors.png](evidence/staging-errors.png) |
-| Fig 20 | Post-recovery temp file + visits query logs | [evidence/post-recovery-temp-files.png](evidence/post-recovery-temp-files.png) |
+| Fig 1 | Cloud SQL Dashboard — Feb 12 morning (93.867% CPU, 108 connections) | [evidence/fig01-cloud-sql-dashboard-morning.png](evidence/fig01-cloud-sql-dashboard-morning.png) |
+| Fig 2, 3, 11 | Query Latency (P99 30-40s), CPU Utilization, Database Load by DB, Log Entries by Severity | [evidence/fig02-03-11-query-latency-cpu-dbload.png](evidence/fig02-03-11-query-latency-cpu-dbload.png) |
+| Fig 4, 6 | Oldest Transaction by Age (~25,000s), Rows Fetched vs Returned vs Written (500M/s), WAL Archiving, Transaction ID utilization | [evidence/fig04-06-oldest-txn-rows-fetched.png](evidence/fig04-06-oldest-txn-rows-fetched.png) |
+| Fig 5, 10 | Block Read Count (spike to 6M/s), Deadlock Count (zero), Rows Processed, Rows in DB by state | [evidence/fig05-10-block-reads-deadlock-rows.png](evidence/fig05-10-block-reads-deadlock-rows.png) |
+| Fig 7 | GCP Log Summary (522 entries in 30 seconds) | [evidence/fig07-gcp-log-summary.png](evidence/fig07-gcp-log-summary.png) |
+| Fig 8 | Backend HTTP 400 errors (rapid-fire GET 400s from okhttp) | [evidence/fig08-backend-400-errors.png](evidence/fig08-backend-400-errors.png) |
+| Fig 9 | Cloud SQL Dashboard gauges (CPU 89.483%, connections 606, 486 errors) | [evidence/fig09-cloud-sql-dashboard-outage.png](evidence/fig09-cloud-sql-dashboard-outage.png) |
+| Fig 10 | Deadlock Count by Database (flat zero, standalone view) | [evidence/fig10-deadlock-count.png](evidence/fig10-deadlock-count.png) |
+| Fig 12, 13 | Connections per Database (8+ DBs), Wait Event Types (spike to 30+), IO Wait Breakdown, Data Transfer bytes | [evidence/fig12-13-connections-wait-events.png](evidence/fig12-13-connections-wait-events.png) |
+| Fig 14, 17, 18 | Temp Data Size, Transaction Count (commit/rollback), Connection Count by App Name, New Connections/sec | [evidence/fig14-17-18-txn-connections-temp.png](evidence/fig14-17-18-txn-connections-temp.png) |
+| Fig 14, 15 | Temp Data Size with DB legend (20+ GB), Temp Files count (peak ~2,500–3,000), New Connections/sec with legend | [evidence/fig14-15-temp-data-and-files.png](evidence/fig14-15-temp-data-and-files.png) |
+| Fig 16 | Backend pg-pool timeout errors + slow recovery (10-13s response times) | [evidence/fig16-backend-timeout-errors.png](evidence/fig16-backend-timeout-errors.png) |
+| Fig 19 | Staging database insert/update errors during outage window | [evidence/fig19-staging-errors.png](evidence/fig19-staging-errors.png) |
+| Fig 20 | Post-recovery logs — alternating temp file + visits SELECT statements | [evidence/fig20-post-recovery-temp-files.png](evidence/fig20-post-recovery-temp-files.png) |
 
 ---
 
